@@ -1,0 +1,70 @@
+stages:
+    - validate
+    - plan
+    - apply
+    - post-deploy
+
+variables:
+  TF_IN_AUTOMATION: "true"
+  GOOGLE_APPLICATION_CREDENTIALS: "./creds/serviceaccount.json"
+  TF_LOG: DEBUG  
+  
+services:
+  - docker:dind
+
+image:
+  name: hashicorp/terraform:light
+  entrypoint:
+    - '/usr/bin/env'
+    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+before_script:
+  - rm -rf .terraform
+  - terraform --version
+  - mkdir -p ./creds
+  - echo "$GCLOUD_SERVICE_KEY" | base64 -d > "$GOOGLE_APPLICATION_CREDENTIALS"
+  - echo "running terraform init"
+  # use -reconfigure to use different gcs backend (different remote state file in bucket)
+  - terraform init -reconfigure
+
+validate:
+  stage: validate
+  script:
+    - terraform fmt -check=true
+    - terraform validate
+
+plan:
+  stage: plan
+  script:
+    - terraform plan -out "planfile"
+  artifacts:
+    paths:
+      - "planfile"
+
+provision:
+  stage: apply
+  when: manual
+  only:
+    - master
+  script:
+    # provision tf resources
+    - terraform apply -auto-approve -input=false -parallelism=1 "planfile"
+
+graph:
+  stage: post-deploy
+  only:
+    - master
+  script:
+    - terraform graph
+
+destroy:
+  stage: post-deploy
+  only:
+    - master
+  when: manual
+  script:
+    # destroy tf resources
+    - terraform destroy -auto-approve -input=false -parallelism=1
+
+
+
